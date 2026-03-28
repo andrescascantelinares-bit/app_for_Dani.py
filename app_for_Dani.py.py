@@ -1,4 +1,5 @@
 import streamlit as st
+import plotly.express as px
 from datetime import datetime
 
 # --- CONFIGURACIÓN DE SEGURIDAD AISAAC-SHIELD ---
@@ -81,6 +82,39 @@ with tab3:
     conn = sqlite3.connect('logistica_primo.db')
     df_g = pd.read_sql_query("SELECT * FROM gastos ORDER BY id DESC", conn)
     conn.close()
+    with tab3: # O el nombre que le hayas puesto a la pestaña de Resumen
+        st.header("Estado de Cuenta")
+    conn = sqlite3.connect('logistica_primo.db')
+    df_v = pd.read_sql_query("SELECT * FROM viajes", conn)
+    df_g = pd.read_sql_query("SELECT * FROM gastos", conn)
+    conn.close()
+
+    # --- AQUÍ VA EL GRÁFICO ---
+    if not df_g.empty:
+        st.subheader("Análisis de Gastos")
+        # Agrupa por concepto y suma los montos
+        df_resumen = df_g.groupby("concepto")["monto"].sum().reset_index()
+        
+        fig = px.pie(df_resumen, values='monto', names='concepto', 
+                     hole=0.4, title="¿En qué se va la plata?")
+        
+        st.plotly_chart(fig, use_container_width=True)
+    # --------------------------
+    # --- MÉTRICAS DE GANANCIA NETA ---
+    st.divider() # Una línea para separar
+    col1, col2, col3 = st.columns(3)
+    
+    total_fletes = df_v['monto'].sum() if not df_v.empty else 0
+    total_gastos = df_g['monto'].sum() if not df_g.empty else 0
+    ganancia_neta = total_fletes - total_gastos
+
+    with col1:
+        st.metric("Total Fletes", f"₡{total_fletes:,.0f}")
+    with col2:
+        st.metric("Total Gastos", f"₡{total_gastos:,.0f}", delta=f"-₡{total_gastos:,.0f}", delta_color="inverse")
+    with col3:
+        st.metric("Ganancia Neta", f"₡{ganancia_neta:,.0f}", delta=f"₡{ganancia_neta:,.0f}")
+    # (Debajo sigue el resto de tus métricas e historial...)
 
     if not df_g.empty:
         st.subheader("Evidencia de Gastos")
