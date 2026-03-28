@@ -77,28 +77,28 @@ with tab2:
             guardar_gasto(f_g.strftime("%Y-%m-%d"), concep, mon_g, foto_bin)
             st.success(f"Gasto de {concep} guardado con éxito.")
 
-with tab3:
+with tab3: # O el nombre que le hayas puesto a la pestaña de Resumen
     st.header("Estado de Cuenta")
-    conn = sqlite3.connect('logistica_primo.db')
-    df_g = pd.read_sql_query("SELECT * FROM gastos ORDER BY id DESC", conn)
-    conn.close()
-    with tab3: # O el nombre que le hayas puesto a la pestaña de Resumen
-        st.header("Estado de Cuenta")
     conn = sqlite3.connect('logistica_primo.db')
     df_v = pd.read_sql_query("SELECT * FROM viajes", conn)
     df_g = pd.read_sql_query("SELECT * FROM gastos", conn)
     conn.close()
-
     # --- AQUÍ VA EL GRÁFICO ---
     if not df_g.empty:
         st.subheader("Análisis de Gastos")
         # Agrupa por concepto y suma los montos
         df_resumen = df_g.groupby("concepto")["monto"].sum().reset_index()
         
-        fig = px.pie(df_resumen, values='monto', names='concepto', 
-                     hole=0.4, title="¿En qué se va la plata?")
-        
-        st.plotly_chart(fig, use_container_width=True)
+        # --- EL TOQUE RICO (Colores Ticos) ---
+    fig = px.pie(df_resumen, 
+             values='monto', 
+             names='concepto', 
+             hole=0.5, # Lo hace ver como una dona moderna
+             color_discrete_sequence=['#002B7F', '#CE1126', '#FFFFFF', '#F1C40F']) # Azul, Rojo, Blanco y Oro
+
+# Esto quita los bordes feos y ajusta el tamaño para el iPhone
+    fig.update_layout(showlegend=True, margin=dict(t=30, b=10, l=10, r=10))
+    st.plotly_chart(fig, use_container_width=True)
     # --------------------------
     # --- MÉTRICAS DE GANANCIA NETA ---
     st.divider() # Una línea para separar
