@@ -12,7 +12,7 @@ CODIGO_RENOVACION_MAESTRO = "GALLO-2026-TICO"
 
 def verificar_licencia_temporal():
     # 1. Configuración de vencimiento
-    fecha_actual = datetime.now().strftime("2026-1-1")
+    fecha_actual = datetime.now().strftime("2026-5-1")
     
     if fecha_actual > FECHA_EXPIRACION:
         st.error("⚠️ ACCESO RESTRINGIDO: Licencia Vencida")
