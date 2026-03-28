@@ -77,31 +77,36 @@ with tab2:
             guardar_gasto(f_g.strftime("%Y-%m-%d"), concep, mon_g, foto_bin)
             st.success(f"Gasto de {concep} guardado con éxito.")
 
-with tab3: # O el nombre que le hayas puesto a la pestaña de Resumen
+# --- 1. FUNCIÓN PARA ELIMINAR (Pégala antes del with tab3) ---
+def eliminar_gasto_db(id_gasto):
+    conn = sqlite3.connect('logistica_primo.db')
+    c = conn.cursor()
+    c.execute("DELETE FROM gastos WHERE id = ?", (id_gasto,))
+    conn.commit()
+    conn.close()
+
+# --- 2. REEMPLAZA DESDE LA LÍNEA 80 EN ADELANTE CON ESTO ---
+with tab3: 
     st.header("Estado de Cuenta")
     conn = sqlite3.connect('logistica_primo.db')
     df_v = pd.read_sql_query("SELECT * FROM viajes", conn)
     df_g = pd.read_sql_query("SELECT * FROM gastos", conn)
     conn.close()
-    # --- AQUÍ VA EL GRÁFICO ---
+
     if not df_g.empty:
         st.subheader("Análisis de Gastos")
-        # Agrupa por concepto y suma los montos
         df_resumen = df_g.groupby("concepto")["monto"].sum().reset_index()
         
-        # --- EL TOQUE RICO (Colores Ticos) ---
-    fig = px.pie(df_resumen, 
-             values='monto', 
-             names='concepto', 
-             hole=0.5, # Lo hace ver como una dona moderna
-             color_discrete_sequence=['#002B7F', '#CE1126', '#FFFFFF', '#F1C40F']) # Azul, Rojo, Blanco y Oro
+        fig = px.pie(df_resumen, 
+                 values='monto', 
+                 names='concepto', 
+                 hole=0.5, 
+                 color_discrete_sequence=['#002B7F', '#CE1126', '#F1C40F', '#7F8C8D']) 
 
-# Esto quita los bordes feos y ajusta el tamaño para el iPhone
-    fig.update_layout(showlegend=True, margin=dict(t=30, b=10, l=10, r=10))
-    st.plotly_chart(fig, use_container_width=True)
-    # --------------------------
-    # --- MÉTRICAS DE GANANCIA NETA ---
-    st.divider() # Una línea para separar
+        fig.update_layout(showlegend=True, margin=dict(t=30, b=10, l=10, r=10))
+        st.plotly_chart(fig, use_container_width=True)
+    
+    st.divider() 
     col1, col2, col3 = st.columns(3)
     
     total_fletes = df_v['monto'].sum() if not df_v.empty else 0
@@ -114,17 +119,23 @@ with tab3: # O el nombre que le hayas puesto a la pestaña de Resumen
         st.metric("Total Gastos", f"₡{total_gastos:,.0f}", delta=f"-₡{total_gastos:,.0f}", delta_color="inverse")
     with col3:
         st.metric("Ganancia Neta", f"₡{ganancia_neta:,.0f}", delta=f"₡{ganancia_neta:,.0f}")
-    # (Debajo sigue el resto de tus métricas e historial...)
 
     if not df_g.empty:
         st.subheader("Evidencia de Gastos")
-        for _, row in df_g.iterrows():
-            with st.expander(f"{row['fecha']} - {row['concepto']} (₡{row['monto']:,.0f})"):
+        for index, row in df_g.iterrows():
+            # Título del expansor
+            with st.expander(f"📅 {row['fecha']} — {row['concepto']} (₡{row['monto']:,.0f})"):
                 if row['foto']:
                     st.image(row['foto'], caption=f"Factura de {row['concepto']}")
                 else:
-                    st.info("No se adjuntó foto para este gasto.")
+                    st.info("No hay foto adjunta.")
+                
+                st.divider()
+                # Botón de borrar con confirmación
+                borrar_pop = st.popover("🗑️ Borrar este gasto", use_container_width=True)
+                borrar_pop.warning("¿Estás seguro de eliminar este registro?")
+                if borrar_pop.button("Confirmar Eliminación", key=f"del_{row['id']}", type="primary"):
+                    eliminar_gasto_db(row['id'])
+                    st.rerun() # Refresca para actualizar gráfico y métricas
     else:
-        st.info("No hay gastos registrados.")
-
-# (El resto del código de viajes y PDF se mantiene igual)
+        st.info("No hay gastos registrados todavía.")
