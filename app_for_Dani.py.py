@@ -3,54 +3,27 @@ import plotly.express as px
 import sqlite3
 import pandas as pd
 from datetime import datetime
-from fpdf import FPDF
 import io
 
-# --- CONFIGURACIÓN DE SEGURIDAD AISAAC-SHIELD ---
-FECHA_EXPIRACION = "2026-05-01" 
-CODIGO_RENOVACION_MAESTRO = "GALLO-2026-TICO"
+# --- 1. CONFIGURACIÓN DE APOYO TÉCNICO (Sin Bloqueo) ---
+FECHA_SOPORTE = "2026-05-01" 
 
-def verificar_licencia_temporal():
-    # 1. Configuración de vencimiento
+def mostrar_estado_soporte():
+    # Usamos la fecha real del sistema
     fecha_actual = datetime.now().strftime("2026-5-1")
     
-    if fecha_actual > FECHA_EXPIRACION:
-        st.error("⚠️ ACCESO RESTRINGIDO: Licencia Vencida")
-        
-        # Diseño para el cobro por SINPE
-        st.markdown(f"""
-        ### 🛡️ Renovación de Aisaac-Shield
-        Para seguir registrando fletes y gastos, por favor renueva tu suscripción:
-        * **Monto:** ₡10,000 (o el monto que acordaron)
-        * **SINPE Móvil:** 85643342 (Andrés)
-        """)
-        
-        # Botón de WhatsApp con mensaje automático
-        mensaje_wa = "Hola Andrés! Ya te hice el Sinpe para renovar la app de los camiones. ¿Me pasas el código?"
-        url_wa = f"https://wa.me/5068XXXXXXX?text={mensaje_wa.replace(' ', '%20')}"
-        
-        st.link_button("📲 Enviar Comprobante por WhatsApp", url_wa, type="primary")
-        
-        st.divider()
-        
-        # Espacio para meter el código que tú le des
-        intento = st.text_input("Ingresa el Código de Renovación:", type="password", help="Andrés te dará este código tras el pago.")
-        
-        if st.button("🔓 Activar Sistema Now"):
-            if intento == CODIGO_RENOVACION_MAESTRO:
-                    st.success("✅ ¡Licencia validada! Ya puedes entrar.")
-            return True
+    with st.sidebar:
+        st.markdown("### 🛡️ Aisaac-Shield")
+        if fecha_actual > FECHA_SOPORTE:
+            st.info("Soporte técnico: Finalizado")
+            # Usa tu número real aquí
+            url_wa = "https://wa.me/5068XXX?text=Hola%20Andres!%20Actualizamos%20la%20app?"
+            st.link_button("📲 Contactar a Andrés", url_wa)
         else:
-                # --- ESTO ES LO QUE VA EN EL ELSE ---
-            st.error("❌ Código incorrecto o expirado.")
-            st.toast("Verifica el pago con Andrés", icon="⚠️")
-                
-        
-        return False # Mantiene la app bloqueada
-    
-    return True # La app funciona normal si no ha vencido
-# --- FUNCIONES DE BASE DE DATOS (IMPORTANTE: Definirlas antes de la interfaz) ---
+            st.success("Soporte técnico: Activo")
+            st.caption(f"Vence el: {FECHA_SOPORTE}")
 
+# --- 2. FUNCIONES DE BASE DE DATOS ---
 def crear_db():
     conn = sqlite3.connect('logistica_primo.db')
     c = conn.cursor()
@@ -78,29 +51,16 @@ def eliminar_gasto_db(id_gasto):
     conn.commit()
     conn.close()
 
-# --- INICIO DE LA APP ---
-if verificar_licencia_temporal():
-    crear_db()
-    st.set_page_config(page_title="Aisaac_surf Logistics", layout="centered")
-    st.sidebar.success("🛡️ Aisaac-Shield: Activo")
+# --- 3. INICIO DE LA APP ---
+crear_db() 
+st.set_page_config(page_title="Logística Primo", layout="centered")
+mostrar_estado_soporte() # <--- Ahora sí funcionará porque la definimos arriba
 
-    tab1, tab2, tab3 = st.tabs(["➕ Viajes", "📉 Gastos con Foto", "📊 Resumen"])
+tab1, tab2, tab3 = st.tabs(["➕ Viajes", "📉 Gastos con Foto", "📊 Resumen"])
 
-    with tab2:
-        st.header("Registrar Gasto")
-        with st.form("form_gasto", clear_on_submit=True):
-            f_g = st.date_input("Fecha", datetime.now())
-            concep = st.selectbox("Concepto", ["Diesel", "Peaje", "Mantenimiento", "Comida", "Otros"])
-            mon_g = st.number_input("Monto (CRC)", min_value=0, step=1000)
-            st.write("📷 Tomar foto del tiquete/factura:")
-            img_file = st.camera_input("Capturar factura")
-            
-            if st.form_submit_button("Guardar Gasto y Foto"):
-                foto_bin = img_file.getvalue() if img_file else None
-                guardar_gasto(f_g.strftime("%Y-%m-%d"), concep, mon_g, foto_bin)
-                st.success(f"Gasto de {concep} guardado con éxito.")
+# ... Aquí sigue el resto de tu código de los tabs ...
 
-    with tab3:
+with tab3:
         st.header("📊 Estado de Cuenta")
         conn = sqlite3.connect('logistica_primo.db')
         df_v = pd.read_sql_query("SELECT * FROM viajes", conn)
