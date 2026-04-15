@@ -1,15 +1,25 @@
 import streamlit as st
 import plotly.express as px
-import sqlite3
 import pandas as pd
 from datetime import datetime
-import io
+from supabase import create_client, Client
+import base64
+
+# --- INICIALIZAR SUPABASE ---
+# Usamos st.secrets para mayor seguridad al subirlo a la nube
+@st.cache_resource
+def init_conexion():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase: Client = init_conexion()
 
 # --- 1. CONFIGURACIÓN DE APOYO TÉCNICO (Aisaac-Shield) ---
 FECHA_SOPORTE = "2026-05-01" 
 
 def mostrar_estado_soporte():
-    fecha_actual = datetime.now().strftime("2026-5-1")
+    fecha_actual = datetime.now().strftime("%Y-%m-%d")
     with st.sidebar:
         st.markdown("### 🛡️ Aisaac-Shield")
         if fecha_actual > FECHA_SOPORTE:
@@ -20,34 +30,24 @@ def mostrar_estado_soporte():
             st.success("Soporte técnico: Activo")
             st.caption(f"Vence el: {FECHA_SOPORTE}")
 
-# --- 2. FUNCIONES DE BASE DE DATOS ---
-def crear_db():
-    conn = sqlite3.connect('logistica_primo.db')
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS viajes 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, cliente TEXT, origen TEXT, destino TEXT, monto REAL, notas TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS gastos 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, concepto TEXT, monto REAL, foto BLOB)''')
-    conn.commit()
-    conn.close()
-
+# --- 2. FUNCIONES DE BASE DE DATOS (NUBE) ---
 def guardar_gasto(fecha, concepto, monto, foto_bytes):
-    conn = sqlite3.connect('logistica_primo.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO gastos (fecha, concepto, monto, foto) VALUES (?,?,?,?)", (fecha, concepto, monto, foto_bytes))
-    conn.commit()
-    conn.close()
+    # Convertimos la imagen a texto (base64) para guardarla en la tabla de Supabase
+    foto_b64 = base64.b64encode(foto_bytes).decode('utf-8') if foto_bytes else None
+    
+    datos = {
+        "fecha": fecha,
+        "concepto": concepto,
+        "monto": monto,
+        "foto": foto_b64
+    }
+    supabase.table("gastos").insert(datos).execute()
 
 def eliminar_gasto_db(id_gasto):
-    conn = sqlite3.connect('logistica_primo.db')
-    c = conn.cursor()
-    c.execute("DELETE FROM gastos WHERE id = ?", (id_gasto,))
-    conn.commit()
-    conn.close()
+    supabase.table("gastos").delete().eq("id", id_gasto).execute()
 
 # --- 3. CONFIGURACIÓN DE PÁGINA E INTERFAZ ---
 st.set_page_config(page_title="Logística Primo", layout="centered")
-crear_db()
 mostrar_estado_soporte()
 
 tab1, tab2, tab3 = st.tabs(["➕ Viajes", "📉 Gastos con Foto", "📊 Resumen"])
@@ -61,14 +61,22 @@ with tab1:
         des = st.text_input("Destino")
         mon = st.number_input("Monto Flete (CRC)", min_value=0, step=1000)
         not_v = st.text_area("Notas")
+        
         if st.form_submit_button("Guardar Viaje"):
-            conn = sqlite3.connect('logistica_primo.db')
-            c = conn.cursor()
-            c.execute("INSERT INTO viajes (fecha, cliente, origen, destino, monto, notas) VALUES (?,?,?,?,?,?)",
-                      (f.strftime("%Y-%m-%d"), cli, ori, des, mon, not_v))
-            conn.commit()
-            conn.close()
-            st.success("Viaje guardado.")
+            # VALIDACIÓN DE DATOS PARA EL VIAJE
+            if not cli.strip() or mon == 0:
+                st.error("⚠️ ¡Epa! Te faltó poner el nombre del cliente o el monto está en cero. Revisá los datos.")
+            else:
+                datos_viaje = {
+                    "fecha": f.strftime("%Y-%m-%d"),
+                    "cliente": cli,
+                    "origen": ori,
+                    "destino": des,
+                    "monto": mon,
+                    "notas": not_v
+                }
+                supabase.table("viajes").insert(datos_viaje).execute()
+                st.success("✅ Viaje guardado en la nube con éxito.")
 
 with tab2:
     st.header("Registrar Gasto")
@@ -77,17 +85,29 @@ with tab2:
         concep = st.selectbox("Concepto", ["Diesel", "Peaje", "Mantenimiento", "Comida", "Otros"])
         mon_g = st.number_input("Monto (CRC)", min_value=0, step=1000)
         img_file = st.camera_input("Capturar factura")
+        
         if st.form_submit_button("Guardar Gasto"):
-            foto_bin = img_file.getvalue() if img_file else None
-            guardar_gasto(f_g.strftime("%Y-%m-%d"), concep, mon_g, foto_bin)
-            st.success("Gasto guardado.")
+            # VALIDACIÓN DE DATOS PARA EL GASTO
+            if mon_g == 0:
+                st.error("⚠️ El monto del gasto no puede estar en cero.")
+            else:
+                foto_bin = img_file.getvalue() if img_file else None
+                guardar_gasto(f_g.strftime("%Y-%m-%d"), concep, mon_g, foto_bin)
+                st.success("✅ Gasto guardado en la nube con éxito.")
 
 with tab3:
     st.header("📊 Resumen y Excel")
-    conn = sqlite3.connect('logistica_primo.db')
-    df_v = pd.read_sql_query("SELECT * FROM viajes", conn)
-    df_g = pd.read_sql_query("SELECT * FROM gastos", conn)
-    conn.close()
+    
+    # Extraer datos de Supabase
+    res_viajes = supabase.table("viajes").select("*").execute()
+    res_gastos = supabase.table("gastos").select("*").execute()
+    
+    # Prevenir errores si la base de datos está vacía
+    cols_v = ['id', 'fecha', 'cliente', 'origen', 'destino', 'monto', 'notas']
+    cols_g = ['id', 'fecha', 'concepto', 'monto', 'foto']
+    
+    df_v = pd.DataFrame(res_viajes.data) if res_viajes.data else pd.DataFrame(columns=cols_v)
+    df_g = pd.DataFrame(res_gastos.data) if res_gastos.data else pd.DataFrame(columns=cols_g)
 
     if not df_v.empty or not df_g.empty:
         df_v['fecha'] = pd.to_datetime(df_v['fecha'])
@@ -112,6 +132,7 @@ with tab3:
         # --- BOTÓN DE EXCEL ---
         st.divider()
         if not df_g_f.empty:
+            # Eliminamos la columna de la foto para que el Excel no quede gigante
             csv = df_g_f.drop(columns=['foto']).to_csv(index=False).encode('utf-8')
             st.download_button("📥 Descargar Gastos para Excel", csv, f"gastos_{m_sel_nom}.csv", "text/csv")
             
@@ -119,12 +140,14 @@ with tab3:
             fig = px.pie(df_g_f, values='monto', names='concepto', hole=0.4, title="Distribución de Gastos")
             st.plotly_chart(fig)
 
-        # Lista de gastos para borrar
+        # Lista de gastos para borrar y ver fotos
         for _, row in df_g_f.iterrows():
             with st.expander(f"{row['concepto']} - ₡{row['monto']:,.0f}"):
-                if row['foto']: st.image(row['foto'])
+                if row['foto']: 
+                    # Decodificamos el texto de vuelta a imagen para mostrarla
+                    st.image(base64.b64decode(row['foto']))
                 if st.button("Eliminar", key=f"del_{row['id']}"):
                     eliminar_gasto_db(row['id'])
                     st.rerun()
     else:
-        st.info("Sin datos registrados.")
+        st.info("Sin datos registrados aún.")
