@@ -67,16 +67,22 @@ with tab1:
             if not cli.strip() or mon == 0:
                 st.error("⚠️ ¡Epa! Te faltó poner el nombre del cliente o el monto está en cero. Revisá los datos.")
             else:
-                datos_viaje = {
-                    "fecha": f.strftime("%Y-%m-%d"),
-                    "cliente": cli,
-                    "origen": ori,
-                    "destino": des,
-                    "monto": mon,
-                    "notas": not_v
-                }
-                supabase.table("viajes").insert(datos_viaje).execute()
-                st.success("✅ Viaje guardado en la nube con éxito.")
+                # MODO OFFLINE / MANEJO DE ERRORES
+                try:
+                    with st.spinner("Buscando señal y conectando con la nube..."):
+                        datos_viaje = {
+                            "fecha": f.strftime("%Y-%m-%d"),
+                            "cliente": cli,
+                            "origen": ori,
+                            "destino": des,
+                            "monto": mon,
+                            "notas": not_v
+                        }
+                        supabase.table("viajes").insert(datos_viaje).execute()
+                        st.success("✅ Viaje guardado con éxito.")
+                except Exception:
+                    st.error("📡 Sin señal. No pudimos conectar con la base de datos. Por favor, buscá un lugar con internet e intentalo de nuevo.")
+                    st.warning("💡 Tip: No cerrés la app para no perder lo que escribiste.")
 
 with tab2:
     st.header("Registrar Gasto")
@@ -91,63 +97,78 @@ with tab2:
             if mon_g == 0:
                 st.error("⚠️ El monto del gasto no puede estar en cero.")
             else:
-                foto_bin = img_file.getvalue() if img_file else None
-                guardar_gasto(f_g.strftime("%Y-%m-%d"), concep, mon_g, foto_bin)
-                st.success("✅ Gasto guardado en la nube con éxito.")
+                # MODO OFFLINE / MANEJO DE ERRORES
+                try:
+                    with st.spinner("Buscando señal... Enviando factura..."):
+                        foto_bin = img_file.getvalue() if img_file else None
+                        guardar_gasto(f_g.strftime("%Y-%m-%d"), concep, mon_g, foto_bin)
+                        st.success("✅ Gasto guardado con éxito.")
+                except Exception:
+                    st.error("📡 Error de conexión. La señal está muy débil para subir la foto o el gasto.")
+                    st.info("Intentá de nuevo cuando tengás mejor cobertura.")
 
 with tab3:
     st.header("📊 Resumen y Excel")
     
     # Extraer datos de Supabase
-    res_viajes = supabase.table("viajes").select("*").execute()
-    res_gastos = supabase.table("gastos").select("*").execute()
+    # Aquí también podemos proteger la carga inicial por si se queda sin internet al abrir la pestaña
+    try:
+        res_viajes = supabase.table("viajes").select("*").execute()
+        res_gastos = supabase.table("gastos").select("*").execute()
+        datos_cargados = True
+    except Exception:
+        st.error("📡 Sin conexión. No pudimos descargar el resumen de la nube.")
+        datos_cargados = False
+        res_viajes = None
+        res_gastos = None
     
-    # Prevenir errores si la base de datos está vacía
-    cols_v = ['id', 'fecha', 'cliente', 'origen', 'destino', 'monto', 'notas']
-    cols_g = ['id', 'fecha', 'concepto', 'monto', 'foto']
-    
-    df_v = pd.DataFrame(res_viajes.data) if res_viajes.data else pd.DataFrame(columns=cols_v)
-    df_g = pd.DataFrame(res_gastos.data) if res_gastos.data else pd.DataFrame(columns=cols_g)
-
-    if not df_v.empty or not df_g.empty:
-        df_v['fecha'] = pd.to_datetime(df_v['fecha'])
-        df_g['fecha'] = pd.to_datetime(df_g['fecha'])
+    if datos_cargados:
+        # Prevenir errores si la base de datos está vacía
+        cols_v = ['id', 'fecha', 'cliente', 'origen', 'destino', 'monto', 'notas']
+        cols_g = ['id', 'fecha', 'concepto', 'monto', 'foto']
         
-        # Filtros de mes y año
-        años = sorted(df_g['fecha'].dt.year.unique(), reverse=True) if not df_g.empty else [datetime.now().year]
-        col1, col2 = st.columns(2)
-        a_sel = col1.selectbox("Año", años)
-        m_nombres = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
-        m_sel_nom = col2.selectbox("Mes", m_nombres, index=datetime.now().month - 1)
-        m_sel = m_nombres.index(m_sel_nom) + 1
+        df_v = pd.DataFrame(res_viajes.data) if res_viajes.data else pd.DataFrame(columns=cols_v)
+        df_g = pd.DataFrame(res_gastos.data) if res_gastos.data else pd.DataFrame(columns=cols_g)
 
-        df_v_f = df_v[(df_v['fecha'].dt.year == a_sel) & (df_v['fecha'].dt.month == m_sel)]
-        df_g_f = df_g[(df_g['fecha'].dt.year == a_sel) & (df_g['fecha'].dt.month == m_sel)]
-
-        # Métricas
-        t_v = df_v_f['monto'].sum()
-        t_g = df_g_f['monto'].sum()
-        st.metric("Ganancia Neta", f"₡{t_v - t_g:,.0f}", delta=f"Fletes: ₡{t_v:,.0f}")
-
-        # --- BOTÓN DE EXCEL ---
-        st.divider()
-        if not df_g_f.empty:
-            # Eliminamos la columna de la foto para que el Excel no quede gigante
-            csv = df_g_f.drop(columns=['foto']).to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Descargar Gastos para Excel", csv, f"gastos_{m_sel_nom}.csv", "text/csv")
+        if not df_v.empty or not df_g.empty:
+            df_v['fecha'] = pd.to_datetime(df_v['fecha'])
+            df_g['fecha'] = pd.to_datetime(df_g['fecha'])
             
-            # Gráfico
-            fig = px.pie(df_g_f, values='monto', names='concepto', hole=0.4, title="Distribución de Gastos")
-            st.plotly_chart(fig)
+            # Filtros de mes y año
+            años = sorted(df_g['fecha'].dt.year.unique(), reverse=True) if not df_g.empty else [datetime.now().year]
+            col1, col2 = st.columns(2)
+            a_sel = col1.selectbox("Año", años)
+            m_nombres = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+            m_sel_nom = col2.selectbox("Mes", m_nombres, index=datetime.now().month - 1)
+            m_sel = m_nombres.index(m_sel_nom) + 1
 
-        # Lista de gastos para borrar y ver fotos
-        for _, row in df_g_f.iterrows():
-            with st.expander(f"{row['concepto']} - ₡{row['monto']:,.0f}"):
-                if row['foto']: 
-                    # Decodificamos el texto de vuelta a imagen para mostrarla
-                    st.image(base64.b64decode(row['foto']))
-                if st.button("Eliminar", key=f"del_{row['id']}"):
-                    eliminar_gasto_db(row['id'])
-                    st.rerun()
-    else:
-        st.info("Sin datos registrados aún.")
+            df_v_f = df_v[(df_v['fecha'].dt.year == a_sel) & (df_v['fecha'].dt.month == m_sel)]
+            df_g_f = df_g[(df_g['fecha'].dt.year == a_sel) & (df_g['fecha'].dt.month == m_sel)]
+
+            # Métricas
+            t_v = df_v_f['monto'].sum()
+            t_g = df_g_f['monto'].sum()
+            st.metric("Ganancia Neta", f"₡{t_v - t_g:,.0f}", delta=f"Fletes: ₡{t_v:,.0f}")
+
+            # --- BOTÓN DE EXCEL ---
+            st.divider()
+            if not df_g_f.empty:
+                # Eliminamos la columna de la foto para que el Excel no quede gigante
+                csv = df_g_f.drop(columns=['foto']).to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Descargar Gastos para Excel", csv, f"gastos_{m_sel_nom}.csv", "text/csv")
+                
+                # Gráfico
+                fig = px.pie(df_g_f, values='monto', names='concepto', hole=0.4, title="Distribución de Gastos")
+                st.plotly_chart(fig)
+
+            # Lista de gastos para borrar y ver fotos
+            for _, row in df_g_f.iterrows():
+                with st.expander(f"{row['concepto']} - ₡{row['monto']:,.0f}"):
+                    if row['foto']: 
+                        # Decodificamos el texto de vuelta a imagen para mostrarla
+                        st.image(base64.b64decode(row['foto']))
+                    if st.button("Eliminar", key=f"del_{row['id']}"):
+                        eliminar_gasto_db(row['id'])
+                        st.rerun()
+        else:
+            st.info("Sin datos registrados aún.")
